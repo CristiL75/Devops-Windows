@@ -1,3 +1,88 @@
+function Get-NetworkConfiguration {
+    [CmdletBinding()]
+    param(
+        [switch]$IncludeDisabled,
+        [switch]$DetailedInfo
+    )
+
+    $results = @()
+
+    try {
+        $adapters = Get-NetAdapter -ErrorAction Stop | Sort-Object ifIndex
+    } catch {
+        Write-Warning "Nu pot citi adaptoarele de rețea: $($_.Exception.Message)"
+        return @()
+    }
+
+    foreach ($adapter in $adapters) {
+        if ($adapter.Status -eq "Up" -or $IncludeDisabled) {
+
+            $statusText = if ($adapter.Status -eq "Up") {
+                "Up"
+            } elseif ($adapter.Status -eq "Disabled") {
+                "Down"
+            } elseif ($adapter.Status -eq "Disconnected") {
+                "Disconnected"
+            } else {
+                $adapter.Status
+            }
+
+            try {
+                $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.ifIndex -ErrorAction Stop
+            } catch {
+                $ipConfig = $null
+                if ($DetailedInfo) {
+                    Write-Verbose "Nu s-a putut citi IP config pentru $($adapter.Name): $($_.Exception.Message)"
+                }
+            }
+
+            if ($ipConfig -and $ipConfig.IPv4Address) {
+                $ipAddress  = $ipConfig.IPv4Address[0].IPAddress
+                $subnetMask = $ipConfig.IPv4Address[0].PrefixLength
+            } else {
+                $ipAddress  = "No IP"
+                $subnetMask = "N/A"
+            }
+
+            if ($ipConfig -and $ipConfig.IPv4DefaultGateway) {
+                $defaultGw = $ipConfig.IPv4DefaultGateway.NextHop
+            } else {
+                $defaultGw = "No Gateway"
+            }
+
+            if ($ipConfig -and $ipConfig.DnsServer -and $ipConfig.DnsServer.ServerAddresses) {
+                $dnsServers = ($ipConfig.DnsServer.ServerAddresses -join ", ")
+            } else {
+                $dnsServers = "No DNS"
+            }
+
+            $dhcpEnabled = $false
+            try {
+                $ipIf = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+                if ($ipIf.Dhcp -eq "Enabled") { $dhcpEnabled = $true } else { $dhcpEnabled = $false }
+            } catch {
+                $dhcpEnabled = $false
+            }
+
+            $results += [PSCustomObject]@{
+                Name                 = $adapter.Name
+                InterfaceDescription = $adapter.InterfaceDescription
+                Status               = $statusText
+                LinkSpeed            = $adapter.LinkSpeed
+                MacAddress           = $adapter.MacAddress
+                IPAddress            = $ipAddress
+                SubnetMask           = $subnetMask
+                DefaultGateway       = $defaultGw
+                DNSServers           = $dnsServers
+                DHCPEnabled          = $dhcpEnabled
+            }
+        } else {
+            if ($DetailedInfo) { Write-Verbose "Sarit peste adaptorul dezactivat: $($adapter.Name)" }
+        }
+    }
+
+    return $results
+}
 
 function Test-NetworkConnectivity {
     param(
