@@ -1,116 +1,92 @@
 function Get-NetworkConfiguration {
     [CmdletBinding()]
     param(
+        [switch]$IncludeDisabled,
+        [switch]$DetailedInfo
+    )
 
-        Write-Host "===============================" -ForegroundColor Cyan
-        Write-Host "=== Network & Connectivity Monitor Starting ===" -ForegroundColor Cyan
-        Write-Host "===============================" -ForegroundColor Cyan
+    $results = @()
 
-        # 1. Get network configuration
-        $networkConfig = Get-NetworkConfiguration
-        $activeAdapters = ($networkConfig | Where-Object { $_.Status -eq "Up" }).Count
-        $totalAdapters = $networkConfig.Count
-        $adaptersNoIP = ($networkConfig | Where-Object { $_.IPAddress -eq "No IP" }).Count
+    try {
+        $adapters = Get-NetAdapter -ErrorAction Stop | Sort-Object ifIndex
+    } catch {
+        Write-Warning "Nu pot citi adaptoarele de rețea: $($_.Exception.Message)"
+        return @()
+    }
 
-        Write-Host "\n[ Network Adapters ]" -ForegroundColor Yellow
-        Write-Host ("Active: {0} / Total: {1}" -f $activeAdapters, $totalAdapters) -ForegroundColor Yellow
-        foreach ($adapter in $networkConfig) {
-            $color = if ($adapter.Status -eq "Up") { 'Green' } elseif ($adapter.Status -eq "Disconnected") { 'Yellow' } else { 'Red' }
-            Write-Host ("  - {0} ({1}) | Status: {2}, IP: {3}, MAC: {4}, GW: {5}, DNS: {6}, DHCP: {7}" -f $adapter.Name, $adapter.InterfaceDescription, $adapter.Status, $adapter.IPAddress, $adapter.MacAddress, $adapter.DefaultGateway, $adapter.DNSServers, $adapter.DHCPEnabled) -ForegroundColor $color
-        }
-        if ($adaptersNoIP -gt 0) {
-            Write-Host ("  Adapters without IP: {0}" -f $adaptersNoIP) -ForegroundColor Red
-        }
+    foreach ($adapter in $adapters) {
+        if ($adapter.Status -eq "Up" -or $IncludeDisabled) {
 
-        # 2. Test connectivity
-        $connectivityResults = Test-NetworkConnectivity
-        $totalHosts = $connectivityResults.Count
-        $failedHosts = ($connectivityResults | Where-Object { $_.PingSuccess -eq $false }).Count
-        $totalPorts = ($connectivityResults | Measure-Object TotalPorts -Sum).Sum
-        $totalSuccessfulPorts = ($connectivityResults | Measure-Object SuccessfulPorts -Sum).Sum
-        $portFailureRate = if ($totalPorts -gt 0) { 1 - ($totalSuccessfulPorts / $totalPorts) } else { 1 }
-
-        Write-Host "\n[ Connectivity Results ]" -ForegroundColor Yellow
-        foreach ($result in $connectivityResults) {
-            $color = if ($result.PingSuccess -eq $true -and $result.SuccessfulPorts -eq $result.TotalPorts) {
-                'Green'
-            } elseif ($result.PingSuccess -eq $true -and $result.SuccessfulPorts -gt 0) {
-                'Yellow'
+            $statusText = if ($adapter.Status -eq "Up") {
+                "Up"
+            } elseif ($adapter.Status -eq "Disabled") {
+                "Down"
+            } elseif ($adapter.Status -eq "Disconnected") {
+                "Disconnected"
             } else {
-                'Red'
+                $adapter.Status
             }
-            Write-Host ("- Host: {0}" -f $result.Host) -ForegroundColor $color
-            Write-Host ("    Ping: {0} | Avg Response: {1} ms" -f $result.PingSuccess, $result.AverageResponseTime) -ForegroundColor $color
-            Write-Host ("    Ports: {0}/{1} open" -f $result.SuccessfulPorts, $result.TotalPorts) -ForegroundColor $color
-            foreach ($p in $result.PortTests) {
-                $pColor = if ($p.Success) { 'Green' } else { 'Red' }
-                Write-Host ("      - Port {0}: {1}" -f $p.Port, $p.ResponseTime) -ForegroundColor $pColor
+
+            try {
+                $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.ifIndex -ErrorAction Stop
+            } catch {
+                $ipConfig = $null
+                if ($DetailedInfo) {
+                    Write-Verbose "Nu s-a putut citi IP config pentru $($adapter.Name): $($_.Exception.Message)"
+                }
             }
-        }
 
-        # 3. Firewall status
-        $firewallStatus = Get-FirewallStatus
-        $disabledFirewalls = ($firewallStatus | Where-Object { $_.Enabled -eq $false }).Count
-        $allFirewallsDisabled = ($firewallStatus.Count -gt 0 -and $disabledFirewalls -eq $firewallStatus.Count)
+            if ($ipConfig -and $ipConfig.IPv4Address) {
+                $ipAddress  = $ipConfig.IPv4Address[0].IPAddress
+                $subnetMask = $ipConfig.IPv4Address[0].PrefixLength
+            } else {
+                $ipAddress  = "No IP"
+                $subnetMask = "N/A"
+            }
 
-        Write-Host "\n[ Firewall Status ]" -ForegroundColor Yellow
-        foreach ($fw in $firewallStatus) {
-            $fwColor = if ($fw.Enabled) { 'Green' } else { 'Red' }
-            Write-Host ("- Profile: {0} | Status: {1} | Inbound: {2} | Outbound: {3} | Logging: {4}" -f $fw.Profile, $fw.Status, $fw.DefaultInboundAction, $fw.DefaultOutboundAction, $fw.LoggingEnabled) -ForegroundColor $fwColor
-        }
+            if ($ipConfig -and $ipConfig.IPv4DefaultGateway) {
+                $defaultGw = $ipConfig.IPv4DefaultGateway.NextHop
+            } else {
+                $defaultGw = "No Gateway"
+            }
 
-        # 4. Calculate health score
-        $score = 100
-        $recommendations = @()
-        if ($activeAdapters -eq 0) {
-            $score -= 25
-            $recommendations += "No active adapters: Check physical connections or enable adapters."
-        }
-        $score -= [Math]::Min($adaptersNoIP * 15, 45)
-        if ($adaptersNoIP -gt 0) {
-            $recommendations += "Some adapters have no IP: Check DHCP or configure static IPs."
-        }
-        if ($portFailureRate -ge 0.5) {
-            $score -= 20
-            $recommendations += "Connectivity failures >50%: Check internet connection and DNS."
-        } elseif ($portFailureRate -ge 0.2) {
-            $score -= 10
-            $recommendations += "Connectivity failures 20-50%: Investigate network issues."
-        }
-        $score -= ($disabledFirewalls * 10)
-        if ($disabledFirewalls -gt 0) {
-            $recommendations += "Some firewall profiles are disabled: Enable Windows Firewall for security."
-        }
+            if ($ipConfig -and $ipConfig.DnsServer -and $ipConfig.DnsServer.ServerAddresses) {
+                $dnsServers = ($ipConfig.DnsServer.ServerAddresses -join ", ")
+            } else {
+                $dnsServers = "No DNS"
+            }
 
-        # 5. Color coding summary
-        Write-Host "\n===============================" -ForegroundColor Cyan
-        if ($activeAdapters -eq 0 -or $portFailureRate -ge 0.5 -or $allFirewallsDisabled) {
-            $summaryColor = 'Red'
-        } elseif ($adaptersNoIP -gt 0 -or ($portFailureRate -ge 0.2 -and $portFailureRate -lt 0.5) -or $disabledFirewalls -gt 0) {
-            $summaryColor = 'Yellow'
+            $dhcpEnabled = $false
+            try {
+                $ipIf = Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+                if ($ipIf.Dhcp -eq "Enabled") { $dhcpEnabled = $true } else { $dhcpEnabled = $false }
+            } catch {
+                $dhcpEnabled = $false
+            }
+
+            $results += [PSCustomObject]@{
+                Name                 = $adapter.Name
+                InterfaceDescription = $adapter.InterfaceDescription
+                Status               = $statusText
+                LinkSpeed            = $adapter.LinkSpeed
+                MacAddress           = $adapter.MacAddress
+                IPAddress            = $ipAddress
+                SubnetMask           = $subnetMask
+                DefaultGateway       = $defaultGw
+                DNSServers           = $dnsServers
+                DHCPEnabled          = $dhcpEnabled
+            }
         } else {
-            $summaryColor = 'Green'
-        }
-        Write-Host ("Network Health Score: $score/100") -ForegroundColor $summaryColor
-        if ($recommendations.Count -gt 0) {
-            Write-Host "\n[ Recommendations ]" -ForegroundColor Yellow
-            foreach ($rec in $recommendations) {
-                Write-Host ("- $rec") -ForegroundColor Magenta
-            }
-        }
-        Write-Host "===============================" -ForegroundColor Cyan
-        Write-Host "=== Network & Connectivity Monitor Complete ===" -ForegroundColor Cyan
-        Write-Host "===============================" -ForegroundColor Cyan
-
-        return [PSCustomObject]@{
-            NetworkHealthScore = $score
-            AdapterSummary = $networkConfig
-            ConnectivityResults = $connectivityResults
-            FirewallStatus = $firewallStatus
-            Recommendations = $recommendations
-            MonitorTime = Get-Date
+            if ($DetailedInfo) { Write-Verbose "Sarit peste adaptorul dezactivat: $($adapter.Name)" }
         }
     }
+
+    return $results
+}
+
+function Test-NetworkConnectivity {
+    param(
+        [string[]]$TestHosts = @("8.8.8.8", "1.1.1.1"),
         [int[]]$TestPorts = @(80, 443, 53),
         [int]$TimeoutSeconds = 5
     )
@@ -232,6 +208,12 @@ function Get-FirewallStatus {
 }
 
 function Start-NetworkMonitor {
+    param(
+        [string[]]$TestHosts = @("8.8.8.8", "1.1.1.1", "google.com", "microsoft.com"),
+        [int[]]$TestPorts = @(80, 443, 53),
+        [int]$TimeoutSeconds = 5
+    )
+
     Write-Host "=== Network & Connectivity Monitor Starting ===" -ForegroundColor Cyan
 
     $networkConfig = Get-NetworkConfiguration
@@ -244,8 +226,8 @@ function Start-NetworkMonitor {
         Write-Host "Adapters without IP: $adaptersNoIP" -ForegroundColor Red
     }
 
- 
-    $connectivityResults = Test-NetworkConnectivity
+    # Folosește parametrii primiți!
+    $connectivityResults = Test-NetworkConnectivity -TestHosts $TestHosts -TestPorts $TestPorts -TimeoutSeconds $TimeoutSeconds
     $totalHosts = $connectivityResults.Count
     $failedHosts = ($connectivityResults | Where-Object { $_.PingSuccess -eq $false }).Count
     $totalPorts = ($connectivityResults | Measure-Object TotalPorts -Sum).Sum
@@ -263,7 +245,6 @@ function Start-NetworkMonitor {
         Write-Host ("Host: {0} | Ping: {1} | Ports: {2}/{3}" -f $result.Host, $result.PingSuccess, $result.SuccessfulPorts, $result.TotalPorts) -ForegroundColor $color
     }
 
-
     $firewallStatus = Get-FirewallStatus
     $disabledFirewalls = ($firewallStatus | Where-Object { $_.Enabled -eq $false }).Count
     $allFirewallsDisabled = ($firewallStatus.Count -gt 0 -and $disabledFirewalls -eq $firewallStatus.Count)
@@ -273,29 +254,27 @@ function Start-NetworkMonitor {
         Write-Host ("Firewall Profile: {0} | Status: {1}" -f $fw.Profile, $fw.Status) -ForegroundColor $fwColor
     }
 
-  
     $score = 100
     $recommendations = @()
     if ($activeAdapters -eq 0) {
         $score -= 25
-        $recommendations += "No active adapters: Check physical connections or enable adapters."
+        $recommendations += "Check physical connections or enable adapters"
     }
     $score -= [Math]::Min($adaptersNoIP * 15, 45)
     if ($adaptersNoIP -gt 0) {
-        $recommendations += "Some adapters have no IP: Check DHCP or configure static IPs."
+        $recommendations += "Check DHCP or configure static IPs"
     }
     if ($portFailureRate -ge 0.5) {
         $score -= 20
-        $recommendations += "Connectivity failures >50%: Check internet connection and DNS."
+        $recommendations += "Check internet connection and DNS"
     } elseif ($portFailureRate -ge 0.2) {
         $score -= 10
-        $recommendations += "Connectivity failures 20-50%: Investigate network issues."
+        $recommendations += "Investigate network issues"
     }
     $score -= ($disabledFirewalls * 10)
     if ($disabledFirewalls -gt 0) {
-        $recommendations += "Some firewall profiles are disabled: Enable Windows Firewall for security."
+        $recommendations += "Enable Windows Firewall for security"
     }
-
 
     if ($activeAdapters -eq 0 -or $portFailureRate -ge 0.5 -or $allFirewallsDisabled) {
         $summaryColor = 'Red'
@@ -305,6 +284,13 @@ function Start-NetworkMonitor {
         $summaryColor = 'Green'
     }
     Write-Host ("Network Health Score: $score/100") -ForegroundColor $summaryColor
+
+    if ($recommendations.Count -gt 0) {
+        Write-Host "Recommendations:" -ForegroundColor Yellow
+        foreach ($rec in $recommendations) {
+            Write-Host ("- $rec") -ForegroundColor Magenta
+        }
+    }
 
     Write-Host "=== Network & Connectivity Monitor Complete ===" -ForegroundColor Cyan
 
