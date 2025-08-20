@@ -1,0 +1,283 @@
+### Your Mission
+Create a comprehensive network and connectivity management module that analyzes network configuration, tests connectivity, and monitors network performance.
+ 
+### ✅ SPECIFIC REQUIREMENTS
+Your module MUST meet these exact criteria to pass:
+ 
+#### Function 1: Get-NetworkConfiguration
+- **Input:** IncludeDisabled (switch, optional), DetailedInfo (switch, optional)
+- **Output:** Array of adapter objects with properties: Name, InterfaceDescription, Status, LinkSpeed, MacAddress, IPAddress, SubnetMask, DefaultGateway, DNSServers, DHCPEnabled
+- **Required:** Use `if/else` to determine adapter status and IP configuration validity
+- **Required:** Handle both active and inactive network adapters
+ 
+#### Function 2: Test-NetworkConnectivity
+- **Input:** TestHosts (string array, default list), TestPorts (int array, default 80,443,53), TimeoutSeconds (int, default 5)
+- **Output:** Array of connectivity objects with properties: Host, PingSuccess, AverageResponseTime, PortTests (array), SuccessfulPorts, TotalPorts
+- **Required:** Use `while` loop to iterate through all host/port combinations
+- **Required:** Measure response times and calculate success rates
+ 
+#### Function 3: Get-FirewallStatus
+- **Input:** IncludeRules (switch, optional), Profile (string, default "All")
+- **Output:** Array of profile objects with properties: Profile, Enabled, DefaultInboundAction, DefaultOutboundAction, LoggingEnabled, Status, plus optional RulesSummary
+- **Required:** Check all firewall profiles (Domain, Private, Public)
+- **Required:** Analyze firewall rules if IncludeRules switch is used
+ 
+#### Main Function: Start-NetworkMonitor
+- **Required:** Call all 3 functions and display comprehensive network status
+- **Required:** Use color coding: Green=Healthy, Yellow=Warning, Red=Critical
+- **Required:** Return network health object with score (0-100) and recommendations
+ 
+---
+ 
+## Lab Setup
+ 
+### 1. Create Your Script File
+Create a new file: `NetworkManager.ps1`
+ 
+### 2. Starter Template
+```powershell
+# Team 4 - Network & Connectivity Manager
+# File: NetworkManager.ps1
+ 
+# Function 1: Analyze network configuration and adapters
+function Get-NetworkConfiguration {
+    param(
+        [switch]$IncludeDisabled,
+        [switch]$DetailedInfo
+    )
+   
+    # Your code here
+    # Hint: Use Get-NetAdapter and Get-NetIPConfiguration
+    # Use if/else to check adapter status and configuration
+    # Analyze IP settings, DNS, and gateway configuration
+}
+ 
+# Function 2: Test network connectivity and performance
+function Test-NetworkConnectivity {
+    param(
+        [string[]]$TestHosts = @("8.8.8.8", "1.1.1.1", "google.com", "microsoft.com"),
+        [int[]]$TestPorts = @(80, 443, 53),
+        [int]$TimeoutSeconds = 5
+    )
+   
+    # Your code here
+    # Hint: Use Test-NetConnection and Test-Connection
+    # Use while loops to test multiple hosts/ports
+    # Measure response times and success rates
+}
+ 
+# Function 3: Monitor and manage Windows Firewall
+function Get-FirewallStatus {
+    param(
+        [switch]$IncludeRules,
+        [string]$Profile = "All"
+    )
+   
+    # Your code here
+    # Hint: Use Get-NetFirewallProfile and Get-NetFirewallRule
+    # Check firewall status for different profiles
+    # Analyze firewall rules and exceptions
+}
+ 
+# Main function that orchestrates network monitoring
+function Start-NetworkMonitor {
+    Write-Host "=== Network & Connectivity Monitor Starting ===" -ForegroundColor Cyan
+   
+    # Call your functions here in logical order
+    # Display network status, connectivity results, and firewall info
+   
+    Write-Host "=== Network & Connectivity Monitor Complete ===" -ForegroundColor Cyan
+}
+ 
+# Export functions for use by megascript
+Export-ModuleMember -Function Get-NetworkConfiguration, Test-NetworkConnectivity, Get-FirewallStatus, Start-NetworkMonitor
+```
+ 
+---
+ 
+## Step-by-Step Implementation Guide
+ 
+### Step 1: Implement Get-NetworkConfiguration Function (30 minutes)
+ 
+**EXACT REQUIREMENTS:**
+1. ✅ **Get network adapters** using `Get-NetAdapter` or `Get-WmiObject Win32_NetworkAdapter`
+2. ✅ **Get IP configuration** using `Get-NetIPConfiguration` for each adapter
+3. ✅ **Use if/else** for adapter filtering:
+   ```powershell
+   if ($adapter.Status -eq "Up" -or $IncludeDisabled) {
+       # Process this adapter
+   } else {
+       # Skip disabled adapter
+   }
+   ```
+4. ✅ **IP configuration analysis:**
+   ```powershell
+   if ($ipConfig.IPv4Address) {
+       $ipAddress = $ipConfig.IPv4Address.IPAddress
+   } else {
+       $ipAddress = "No IP"
+   }
+   ```
+5. ✅ **Return array** where each object has these EXACT properties:
+   ```powershell
+   [PSCustomObject]@{
+       Name = "Ethernet"
+       InterfaceDescription = "Intel(R) Ethernet Connection"
+       Status = "Up" # or "Down", "Disconnected"
+       LinkSpeed = "1 Gbps"
+       MacAddress = "00-11-22-33-44-55"
+       IPAddress = "192.168.1.100" # or "No IP"
+       SubnetMask = "24" # prefix length
+       DefaultGateway = "192.168.1.1" # or "No Gateway"
+       DNSServers = "8.8.8.8, 1.1.1.1" # comma-separated
+       DHCPEnabled = "Private" # Network category
+   }
+   ```
+6. ✅ **Handle errors** gracefully for adapters without IP configuration
+ 
+### Step 2: Implement Test-NetworkConnectivity Function (30 minutes)
+ 
+**EXACT REQUIREMENTS:**
+1. ✅ **Initialize results** and use nested while loops:
+   ```powershell
+   $results = @()
+   $hostIndex = 0
+   while ($hostIndex -lt $TestHosts.Count) {
+       $host = $TestHosts[$hostIndex]
+       # Test this host
+       $hostIndex++
+   }
+   ```
+2. ✅ **Ping testing** using `Test-Connection`:
+   ```powershell
+   try {
+       $pingResult = Test-Connection -ComputerName $host -Count 4 -ErrorAction Stop
+       $avgResponseTime = ($pingResult | Measure-Object ResponseTime -Average).Average
+       $pingSuccess = $true
+   } catch {
+       $pingSuccess = $false
+       $avgResponseTime = -1
+   }
+   ```
+3. ✅ **Port testing** with while loop:
+   ```powershell
+   $portIndex = 0
+   while ($portIndex -lt $TestPorts.Count) {
+       $port = $TestPorts[$portIndex]
+       $portTest = Test-NetConnection -ComputerName $host -Port $port -WarningAction SilentlyContinue
+       # Store result
+       $portIndex++
+   }
+   ```
+4. ✅ **Return array** where each object has these EXACT properties:
+   ```powershell
+   [PSCustomObject]@{
+       Host = "google.com"
+       PingSuccess = $true
+       AverageResponseTime = 25.5 # in milliseconds, -1 if failed
+       PortTests = @(
+           [PSCustomObject]@{ Port = 80; Success = $true; ResponseTime = "Success" },
+           [PSCustomObject]@{ Port = 443; Success = $true; ResponseTime = "Success" }
+       )
+       SuccessfulPorts = 2
+       TotalPorts = 2
+   }
+   ```
+5. ✅ **Progress indication** with Write-Host messages during testing
+ 
+ 
+**Test Your Function:**
+```powershell
+Test-NetworkConnectivity
+Test-NetworkConnectivity -TestHosts @("google.com", "github.com") -TestPorts @(80, 443)
+```
+ 
+### Step 3: Implement Get-FirewallStatus Function (25 minutes)
+ 
+**EXACT REQUIREMENTS:**
+1. ✅ **Get firewall profiles** using `Get-NetFirewallProfile`
+2. ✅ **Process each profile:**
+   ```powershell
+   foreach ($profile in $firewallProfiles) {
+       if ($profile.Enabled -eq $true) {
+           $statusText = "ENABLED"
+       } else {
+           $statusText = "DISABLED"
+       }
+   }
+   ```
+3. ✅ **Firewall rules analysis** (if IncludeRules switch used):
+   ```powershell
+   if ($IncludeRules) {
+       $allRules = Get-NetFirewallRule
+       $enabledRules = $allRules | Where-Object { $_.Enabled -eq $true }
+       # Create rules summary
+   }
+   ```
+4. ✅ **Return array** where each profile object has these EXACT properties:
+   ```powershell
+   [PSCustomObject]@{
+       Profile = "Domain" # or "Private", "Public"
+       Enabled = $true
+       DefaultInboundAction = "Block" # or "Allow"
+       DefaultOutboundAction = "Allow" # or "Block"
+       LoggingEnabled = $false
+       LogMaxSize = 4096 # KB
+       Status = "ENABLED" # or "DISABLED"
+   }
+   ```
+5. ✅ **Rules summary** (if IncludeRules used):
+   ```powershell
+   # Add to first profile object:
+   $firewallStatus[0] | Add-Member -MemberType NoteProperty -Name "RulesSummary" -Value [PSCustomObject]@{
+       TotalRules = 500
+       EnabledRules = 350
+       InboundRules = 175
+       OutboundRules = 175
+       AllowRules = 300
+       BlockRules = 50
+   }
+   ```
+6. ✅ **Error handling** for insufficient permissions
+ 
+**Test Your Function:**
+```powershell
+Get-FirewallStatus
+Get-FirewallStatus -IncludeRules
+```
+ 
+### Step 4: Complete Main Function (5 minutes)
+ 
+**EXACT REQUIREMENTS:**
+1. ✅ **Call functions in order:** Get-NetworkConfiguration, Test-NetworkConnectivity, Get-FirewallStatus
+2. ✅ **Color coding rules:**
+   - Red: No active adapters, >50% connectivity failures, all firewalls disabled
+   - Yellow: Adapters without IP, 20-50% connectivity failures, some firewalls disabled
+   - Green: All adapters configured, <20% connectivity failures, firewalls enabled
+3. ✅ **Network summary display:**
+   ```powershell
+   $activeAdapters = ($networkConfig | Where-Object { $_.Status -eq "Up" }).Count
+   Write-Host "Network Adapters: $activeAdapters active / $($networkConfig.Count) total"
+   ```
+4. ✅ **Connectivity results** with color-coded status for each host
+5. ✅ **Network health score calculation:**
+   - Start with 100 points
+   - Subtract 25 points if no active adapters
+   - Subtract 15 points per adapter without IP (max 45)
+   - Subtract 20 points if <50% connectivity success
+   - Subtract 10 points per disabled firewall profile
+6. ✅ **Return monitoring object:**
+   ```powershell
+   [PSCustomObject]@{
+       NetworkHealthScore = 85 # 0-100 scale
+       AdapterSummary = $adapterStats
+       ConnectivityResults = $connectivitySummary
+       FirewallStatus = $firewallSummary
+       Recommendations = @("Recommendation1", "Recommendation2")
+       MonitorTime = Get-Date
+   }
+   ```
+7. ✅ **Recommendations based on findings:**
+   - No IP addresses: "Check DHCP or configure static IPs"
+   - Connectivity failures: "Check internet connection and DNS"
+   - Firewall disabled: "Enable Windows Firewall for security"
